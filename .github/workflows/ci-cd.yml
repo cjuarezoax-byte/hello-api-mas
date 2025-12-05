@@ -18,7 +18,7 @@ jobs:
       # Cosmos para entorno de tests en GitHub
       COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
       COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
-      COSMOS_DB_NAME: todo-test
+      COSMOS_DB_NAME: todo
       COSMOS_CONTAINER_NAME: tasks
       COSMOS_USERS_CONTAINER_NAME: users
 
@@ -31,10 +31,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Use Node.js 18.x
+      - name: Use Node.js 20.x
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "20"
           cache: "npm"
 
       - name: Install dependencies
@@ -53,10 +53,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Use Node.js 18.x
+      - name: Use Node.js 20.x
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "20"
           cache: "npm"
 
       - name: Install dependencies (production)
