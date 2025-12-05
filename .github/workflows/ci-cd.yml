@@ -1,0 +1,79 @@
+name: CI/CD hello-api-mas-api
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    name: Run tests (Jest)
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+
+      # Cosmos para entorno de tests en GitHub
+      COSMOS_ENDPOINT: ${{ secrets.COSMOS_ENDPOINT }}
+      COSMOS_KEY: ${{ secrets.COSMOS_KEY }}
+      COSMOS_DB_NAME: todo-test
+      COSMOS_CONTAINER_NAME: tasks
+      COSMOS_USERS_CONTAINER_NAME: users
+
+      # JWT y bcrypt para tests
+      JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+      JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+      BCRYPT_SALT_ROUNDS: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    name: Deploy to Azure Web App
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies (production)
+        run: npm ci --only=production
+
+      - name: Build (optional)
+        run: |
+          echo "No build step required for plain Node/Express API"
+        # Si en el futuro tienes build (TypeScript, bundling), lo agregas aquí
+
+      - name: Zip artifact
+        run: |
+          zip -r release.zip . -x "*.git*"
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: release.zip
