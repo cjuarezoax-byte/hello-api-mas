@@ -8,7 +8,8 @@ const options = {
       version: "1.0.0",
       description: "API REST con JWT (access + refresh), Cosmos DB y Swagger",
     },
-    servers: [{ url: "http://localhost:3000" }],
+    // 👇 usar URL relativa para que funcione tanto en local como en Azure
+    servers: [{ url: "/" }],
     components: {
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" }
