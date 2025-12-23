@@ -1,3 +1,4 @@
+// src/config/swaggerConfig.js
 import swaggerJSDoc from "swagger-jsdoc";
 
 const options = {
@@ -8,16 +9,16 @@ const options = {
       version: "1.0.0",
       description: "API REST con JWT (access + refresh), Cosmos DB y Swagger",
     },
-    // 👇 usar URL relativa para que funcione tanto en local como en Azure
     servers: [{ url: "/" }],
     components: {
       securitySchemes: {
-        bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" }
-      }
+        bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+      },
     },
-    security: [{ bearerAuth: [] }]
+    security: [{ bearerAuth: [] }],
   },
-  apis: ["./src/routes/*.js"]
+  // Escanea todas las rutas para los bloques @swagger
+  apis: ["./src/routes/*.js"],
 };
 
 export const swaggerSpec = swaggerJSDoc(options);

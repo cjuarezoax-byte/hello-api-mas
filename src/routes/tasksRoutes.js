@@ -40,17 +40,71 @@ const router = express.Router();
  *           example: "carlos"
  *         task:
  *           type: string
+ *           description: Descripción de la tarea (1–200 caracteres)
+ *           minLength: 1
+ *           maxLength: 200
+ *           example: "La API de Marketo se autentica correctamente"
+ *         done:
+ *           type: boolean
+ *           description: Indica si la tarea está completada
+ *           example: false
+ *         note:
+ *           type: string
+ *           nullable: true
+ *           description: Nota opcional asociada a la tarea (máx. 2000 caracteres)
+ *           maxLength: 2000
+ *           example: "Esta tarea es prioritaria para esta semana"
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *           description: Fecha de creación en formato ISO 8601
+ *           example: "2025-11-18T22:13:14.123Z"
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *           description: Fecha de última actualización en formato ISO 8601
+ *           example: "2025-11-19T10:05:00.000Z"
+ */
+ 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Task:
+ *       type: object
+ *       description: Tarea almacenada en Cosmos DB
+ *       properties:
+ *         id:
+ *           type: string
+ *           description: Identificador único de la tarea
+ *           example: "443f31a3-ea6f-4305-a5d5-20f4b3c8f123"
+ *         userId:
+ *           type: string
+ *           description: Usuario propietario de la tarea
+ *           example: "carlos"
+ *         task:
+ *           type: string
  *           description: Descripción de la tarea
  *           example: "La API de Marketo se autentica correctamente"
  *         done:
  *           type: boolean
  *           description: Indica si la tarea está completada
  *           example: false
+ *         note:
+ *           type: string
+ *           nullable: true
+ *           description: Nota opcional asociada a la tarea
+ *           example: "Esta tarea es prioritaria para esta semana"
  *         createdAt:
  *           type: string
  *           format: date-time
  *           description: Fecha de creación en formato ISO 8601
  *           example: "2025-11-18T22:13:14.123Z"
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *           description: Fecha de última actualización en formato ISO 8601
+ *           example: "2025-11-19T10:05:00.000Z"
  */
 
 /**
@@ -58,19 +112,51 @@ const router = express.Router();
  * /tasks:
  *   get:
  *     summary: Lista las tareas del usuario autenticado
- *     description: Devuelve todas las tareas asociadas al usuario extraído del access token.
+ *     description: Devuelve las tareas del usuario en formato paginado.
  *     tags: [Tasks]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Número de página (por defecto 1)
+ *       - in: query
+ *         name: pageSize
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *         description: Número de elementos por página (por defecto 20)
+ *       - in: query
+ *         name: done
+ *         schema:
+ *           type: string
+ *           enum: ["true", "false"]
+ *         description: Filtra por estado de la tarea (true = completadas, false = abiertas).
  *     responses:
  *       200:
- *         description: Lista de tareas del usuario autenticado
+ *         description: Lista paginada de tareas del usuario autenticado
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Task'
+ *               type: object
+ *               properties:
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Task'
+ *                 page:
+ *                   type: integer
+ *                   example: 1
+ *                 pageSize:
+ *                   type: integer
+ *                   example: 20
+ *                 hasMore:
+ *                   type: boolean
+ *                   example: false
  *       401:
  *         description: No autorizado. Falta token o es inválido.
  *       500:
@@ -184,12 +270,19 @@ router.get("/:id", async (req, res) => {
  *             properties:
  *               task:
  *                 type: string
- *                 description: Descripción de la tarea
+ *                 description: Descripción de la tarea (1–200 caracteres)
+ *                 minLength: 1
+ *                 maxLength: 200
  *                 example: "Preparar demo de la API hello-api-jwt"
  *               done:
  *                 type: boolean
  *                 description: Estado inicial de la tarea
  *                 default: false
+ *               note:
+ *                 type: string
+ *                 description: Nota opcional asociada a la tarea (máx. 2000 caracteres)
+ *                 maxLength: 2000
+ *                 example: "Presentación para el comité del viernes"
  *     responses:
  *       201:
  *         description: Tarea creada correctamente
@@ -198,7 +291,7 @@ router.get("/:id", async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Task'
  *       400:
- *         description: Datos de entrada inválidos (por ejemplo, falta 'task').
+ *         description: Datos de entrada inválidos (por ejemplo, falta 'task' o excede longitud máxima).
  *       401:
  *         description: No autorizado. Falta token o es inválido.
  *       500:
@@ -210,9 +303,9 @@ router.post(
   async (req, res) => {
     try {
       const userId = req.user.userId;
-      const { task, done } = req.validatedBody;
+      const { task, done, note } = req.validatedBody;
 
-      const created = await createTask(userId, { task, done });
+      const created = await createTask(userId, { task, done, note });
       res.status(201).json(created);
     } catch (err) {
       console.error("Error creando tarea:", err.message);
@@ -252,12 +345,19 @@ router.post(
  *             properties:
  *               task:
  *                 type: string
- *                 description: Nueva descripción de la tarea
+ *                 description: Nueva descripción de la tarea (1–200 caracteres)
+ *                 minLength: 1
+ *                 maxLength: 200
  *                 example: "Actualizar documentación de hello-api-jwt"
  *               done:
  *                 type: boolean
  *                 description: Nuevo estado de la tarea
  *                 example: true
+ *               note:
+ *                 type: string
+ *                 description: Nueva nota asociada a la tarea (vacío para borrar, máx. 2000 caracteres)
+ *                 maxLength: 2000
+ *                 example: "Recordar adjuntar diagrama actualizado"
  *     responses:
  *       200:
  *         description: Tarea actualizada correctamente
@@ -281,10 +381,9 @@ router.put(
     try {
       const userId = req.user.userId;
       const { id } = req.params;
-      const { task, done } = req.validatedBody;
+      const { task, done, note } = req.validatedBody;
 
-      const updated = await updateTask(userId, id, { task, done });
-
+      const updated = await updateTask(userId, id, { task, done, note });
       if (!updated) {
         return sendError(res, {
           status: 404,

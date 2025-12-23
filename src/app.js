@@ -10,6 +10,8 @@ import { swaggerSpec } from "./config/swaggerConfig.js";
 import { getTasksContainer } from "./config/cosmosConfig.js";
 import { sendError } from "./utils/errorResponse.js";
 import cors from "cors";
+import helmet from "helmet";
+import { apiLimiter } from "./config/rateLimitConfig.js";
 
 const app = express();
 
@@ -24,6 +26,9 @@ app.use(
     maxAge: 600, // cache preflight 10 minutos
   })
 );
+
+// Cabeceras de seguridad por defecto
+app.use(helmet());
 
 // 📊 Métricas muy simples en memoria
 const metrics = {
@@ -137,7 +142,7 @@ app.get("/metrics", (req, res) => {
 app.use("/auth", authRoutes);
 
 // Rutas protegidas (requieren JWT)
-app.use("/tasks", authMiddleware, tasksRoutes);
+app.use("/tasks", authMiddleware, apiLimiter, tasksRoutes);
 
 // 🧭 404 handler (rutas no encontradas)
 app.use((req, res, next) => {

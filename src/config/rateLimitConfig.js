@@ -32,3 +32,10 @@ export const refreshLimiter = buildLimiter({
   max: 30, // más permisivo
   code: "REFRESH_RATE_LIMIT",
 });
+
+// 🔐 Límite global para /tasks
+export const apiLimiter = buildLimiter({
+  windowMs: 60 * 1000, // 1 minuto
+  max: 100,            // 100 requests / minuto por IP
+  code: "API_RATE_LIMIT",
+});

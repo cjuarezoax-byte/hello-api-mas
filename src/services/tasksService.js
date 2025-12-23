@@ -10,7 +10,7 @@ export async function listTasksByUser(userId, { done, page, pageSize } = {}) {
   const offset = (pageNumber - 1) * size;
 
   let queryText =
-    "SELECT c.id, c.userId, c.task, c.done, c.createdAt, c.updatedAt FROM c WHERE c.userId = @userId";
+    "SELECT c.id, c.userId, c.task, c.done, c.createdAt, c.updatedAt, c.note FROM c WHERE c.userId = @userId";
   const parameters = [{ name: "@userId", value: userId }];
 
   if (typeof done === "boolean") {
@@ -31,8 +31,14 @@ export async function listTasksByUser(userId, { done, page, pageSize } = {}) {
     })
     .fetchNext();
 
+  // Normalizamos para que siempre haya updatedAt (si falta, usamos createdAt)
+  const items = resources.map((doc) => ({
+    ...doc,
+    updatedAt: doc.updatedAt || doc.createdAt,
+  }));
+
   return {
-    items: resources,
+    items,
     page: pageNumber,
     pageSize: size,
     hasMore: Boolean(continuationToken),
@@ -50,25 +56,40 @@ export const getTaskById = async (userId, id) => {
   };
 
   const { resources } = await container.items.query(querySpec).fetchAll();
-  return resources[0] || null;
+  const task = resources[0] || null;
+
+  if (!task) return null;
+
+  return {
+    ...task,
+    updatedAt: task.updatedAt || task.createdAt,
+  };
 };
 
-export const createTask = async (userId, { task, done = false }) => {
+export const createTask = async (userId, { task, done = false, note }) => {
   const container = await getTasksContainer();
+
+  const now = new Date().toISOString();
 
   const newTask = {
     id: crypto.randomUUID(),
     userId,
     task,
     done,
-    createdAt: new Date().toISOString(),
+    note: note ?? null,     // guardamos null si no envían nada
+    createdAt: now,
+    updatedAt: now,
   };
 
   const { resource } = await container.items.create(newTask);
-  return resource;
+  // Normalizamos también aquí por si acaso
+  return {
+    ...resource,
+    updatedAt: resource.updatedAt || resource.createdAt,
+  };
 };
 
-export const updateTask = async (userId, id, { task, done }) => {
+export const updateTask = async (userId, id, { task, done, note }) => {
   const container = await getTasksContainer();
 
   const existing = await getTaskById(userId, id);
@@ -78,11 +99,15 @@ export const updateTask = async (userId, id, { task, done }) => {
     ...existing,
     task: task ?? existing.task,
     done: typeof done === "boolean" ? done : existing.done,
+    note: note !== undefined ? note : existing.note, // permite borrar nota con ""
     updatedAt: new Date().toISOString(),
   };
 
   const { resource } = await container.items.upsert(updated);
-  return resource;
+  return {
+    ...resource,
+    updatedAt: resource.updatedAt || resource.createdAt,
+  };
 };
 
 export const deleteTask = async (userId, id) => {
