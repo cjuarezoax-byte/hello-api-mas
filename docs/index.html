@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Listado de tareas (Cosmos)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { font-size: 20px; }
+    button { padding: 6px 10px; font-size: 14px; margin-right: 5px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; }
+    th { background: #f0f0f0; text-align: left; }
+    #status { margin-top: 10px; font-size: 13px; }
+    #newTaskInput { padding: 6px; font-size: 14px; width: 250px; }
+
+    /* Modal para notas */
+    #noteModal {
+      display: none;              /* oculto por defecto */
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      align-items: center;        /* centrado vertical */
+      justify-content: center;    /* centrado horizontal */
+      z-index: 999;
+    }
+
+    #noteModal .modal-content {
+      background: #fff;
+      padding: 15px;
+      max-width: 600px;
+      width: 90%;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      font-size: 13px;
+    }
+
+    #noteTextarea {
+      width: 100%;
+      min-height: 180px;
+      font-size: 13px;
+      padding: 6px;
+      box-sizing: border-box;
+      resize: vertical;           /* permite hacerla más grande si quieres */
+    }
+
+    #noteModal .modal-actions {
+      margin-top: 10px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <h1>Lista de tareas (Cosmos DB)</h1>
+  
+  <!-- Panel de autenticación -->
+  <div id="authPanel" style="margin-bottom: 10px;">
+    <input id="usernameInput" type="text" placeholder="Usuario (ej. carlos)" />
+    <input id="passwordInput" type="password" placeholder="Contraseña" />
+    <button id="loginBtn">Login</button>
+    <button id="logoutBtn" disabled>Logout</button>
+    <span id="authStatus" style="margin-left:10px; font-size: 13px; color: #555;"></span>
+  </div>
+
+  <!-- Controles para tareas -->
+  <button id="loadBtn" disabled>Cargar tareas</button>
+
+  <!-- input para el usuario (solo lectura, viene del token) -->
+  <input id="userIdInput" type="text" placeholder="Usuario" readonly />
+
+  <!-- SECCIÓN PARA CREAR TAREAS -->
+  <input id="newTaskInput" type="text" placeholder="Nueva tarea..." disabled />
+  <button id="createBtn" disabled>Crear tarea</button>
+
+  <div id="status"></div>
+  <div id="userSummary"></div>
+
+  <table id="tasksTable">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Usuario</th>
+        <th>Tarea</th>
+        <th>Cerrada</th>
+        <th>Fecha</th>
+        <th>Cerrar / Nota / Borrar</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  
+  <!-- MODAL PARA NOTAS DE TAREAS -->
+  <div id="noteModal">
+    <div class="modal-content">
+      <h3>Nota para la tarea:</h3>
+      <div id="noteTaskTitle" style="font-weight:bold; margin-bottom:8px;"></div>
+      <textarea id="noteTextarea" placeholder="Escribe aquí tu nota (puede ser tan larga como necesites)..."></textarea>
+      <div class="modal-actions">
+        <button id="noteSaveBtn">Guardar nota</button>
+        <button id="noteCancelBtn">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 🔧 -- CONFIGURACIÓN NUEVA (API hello-api) --
+    // Cambia esta URL por la de tu API en Azure Web App
+    // Ejemplo: "https://hello-api-mas-api-dqgfe8gsf0cxdmck.centralus-01.azurewebsites.net"
+    // Ejemplo: "http://localhost:3000";
+    const API_BASE_URL = "https://hello-api-mas-api-dqgfe8gsf0cxdmck.centralus-01.azurewebsites.net";
+
+    // Claves para localStorage
+    const STORAGE_KEYS = {
+      accessToken: "helloApi_accessToken",
+      refreshToken: "helloApi_refreshToken",
+      currentUser: "helloApi_currentUser", // { id, username }
+    };
+
+    // Estado en memoria
+    let accessToken = null;
+    let refreshToken = null;
+    let currentUser = null; // { id, username } tomado de la respuesta de /auth/login
+
+    // 🔧 DOM elements
+    const loadBtn       = document.getElementById("loadBtn");
+    const createBtn     = document.getElementById("createBtn");
+    const newTaskInput  = document.getElementById("newTaskInput");
+    const userIdInput   = document.getElementById("userIdInput");
+    const statusEl      = document.getElementById("status");
+    const userSummaryEl = document.getElementById("userSummary");
+
+    // Auth DOM
+    const usernameInput = document.getElementById("usernameInput");
+    const passwordInput = document.getElementById("passwordInput");
+    const loginBtn      = document.getElementById("loginBtn");
+    const logoutBtn     = document.getElementById("logoutBtn");
+    const authStatusEl  = document.getElementById("authStatus");
+
+    const tbody = document.querySelector("#tasksTable tbody");
+
+    // ========== Auth en localStorage ==========
+    function loadAuthFromStorage() {
+      const storedAccess  = localStorage.getItem(STORAGE_KEYS.accessToken);
+      const storedRefresh = localStorage.getItem(STORAGE_KEYS.refreshToken);
+      const storedUser    = localStorage.getItem(STORAGE_KEYS.currentUser);
+
+      accessToken  = storedAccess || null;
+      refreshToken = storedRefresh || null;
+      currentUser  = storedUser ? JSON.parse(storedUser) : null;
+
+      updateAuthUI();
+    }
+
+    function saveAuth(access, refresh, userObj) {
+      accessToken  = access;
+      refreshToken = refresh;
+      currentUser  = userObj;
+
+      localStorage.setItem(STORAGE_KEYS.accessToken, access || "");
+      localStorage.setItem(STORAGE_KEYS.refreshToken, refresh || "");
+      localStorage.setItem(
+        STORAGE_KEYS.currentUser,
+        userObj ? JSON.stringify(userObj) : ""
+      );
+
+      updateAuthUI();
+    }
+
+    function clearAuth() {
+      accessToken  = null;
+      refreshToken = null;
+      currentUser  = null;
+
+      localStorage.removeItem(STORAGE_KEYS.accessToken);
+      localStorage.removeItem(STORAGE_KEYS.refreshToken);
+      localStorage.removeItem(STORAGE_KEYS.currentUser);
+
+      updateAuthUI();
+    }
+
+    function updateAuthUI() {
+      const isLoggedIn = !!accessToken && !!currentUser;
+
+      if (isLoggedIn) {
+        authStatusEl.textContent = `Conectado como ${currentUser.username}`;
+        loginBtn.disabled = true;
+        logoutBtn.disabled = false;
+
+        loadBtn.disabled = false;
+        createBtn.disabled = false;
+        newTaskInput.disabled = false;
+
+        if (userIdInput) userIdInput.value = currentUser.username || "";
+      } else {
+        authStatusEl.textContent = "No autenticado";
+        loginBtn.disabled = false;
+        logoutBtn.disabled = true;
+
+        loadBtn.disabled = true;
+        createBtn.disabled = true;
+        newTaskInput.disabled = true;
+
+        if (userIdInput) userIdInput.value = "";
+      }
+    }
+
+    // Resumen por usuario
+    function updateUserSummary(tasks, userId) {
+      if (!userSummaryEl) return;
+
+      const total = tasks.length;
+      const cerradas = tasks.filter(t => t.done).length;
+      const abiertas = total - cerradas;
+
+      if (total === 0) {
+        userSummaryEl.textContent = `Usuario: ${userId} no tiene tareas.`;
+      } else {
+        userSummaryEl.textContent =
+          `Usuario: ${userId} Tareas: ${total} ` +
+          `Abiertas: ${abiertas} ` +
+          `Cerradas: ${cerradas}`;
+      }
+    }
+
+    // ========== Modal de notas ==========
+    const noteModal       = document.getElementById("noteModal");
+    const noteTaskTitleEl = document.getElementById("noteTaskTitle");
+    const noteTextarea    = document.getElementById("noteTextarea");
+    const noteSaveBtn     = document.getElementById("noteSaveBtn");
+    const noteCancelBtn   = document.getElementById("noteCancelBtn");
+
+    let currentNoteTaskId = null;
+
+    function openNoteModal(task) {
+      currentNoteTaskId = task.id;
+
+      const currentNote = task.note || "";
+
+      noteTaskTitleEl.textContent = task.task || "(sin título)";
+      noteTextarea.value = currentNote;
+      noteModal.style.display = "flex";
+    }
+
+    function closeNoteModal() {
+      noteModal.style.display = "none";
+      currentNoteTaskId = null;
+    }
+
+    // Eventos del modal
+    noteSaveBtn.addEventListener("click", async () => {
+      if (!currentNoteTaskId) {
+        closeNoteModal();
+        return;
+      }
+
+      try {
+        statusEl.textContent = "Guardando nota...";
+
+        const resp = await apiFetch(`/tasks/${encodeURIComponent(currentNoteTaskId)}`, {
+          method: "PUT",
+          body: JSON.stringify({ note: noteTextarea.value }),
+        });
+
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+
+        statusEl.textContent = "Nota guardada.";
+        closeNoteModal();
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error al guardar nota: " + err.message;
+      }
+    });
+
+    noteCancelBtn.addEventListener("click", () => {
+      closeNoteModal();
+    });
+
+    // Cerrar el modal al hacer clic fuera
+    noteModal.addEventListener("click", (ev) => {
+      if (ev.target === noteModal) {
+        closeNoteModal();
+      }
+    });
+
+    // ========== Helper para llamadas a la API ==========
+    async function apiFetch(path, options = {}) {
+      if (!accessToken) {
+        throw new Error("No hay accessToken. Inicia sesión primero.");
+      }
+
+      const headers = {
+        ...(options.headers || {}),
+        Authorization: `Bearer ${accessToken}`,
+      };
+
+      if (options.body && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      const resp = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        headers,
+      });
+
+      if (resp.status === 401) {
+        clearAuth();
+        throw new Error("No autorizado (401). Vuelve a iniciar sesión.");
+      }
+
+      return resp;
+    }
+
+    // ========== CRUD de tareas ==========
+    async function loadTasks() {
+      if (!accessToken || !currentUser) {
+        alert("Primero inicia sesión.");
+        return;
+      }
+
+      const currentUserId = currentUser.username;
+      statusEl.textContent = `Cargando tareas para "${currentUserId}"...`;
+
+      tbody.innerHTML = "";
+
+      try {
+        const resp = await apiFetch(`/tasks?page=1&pageSize=100`);
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+
+        const result = await resp.json();
+        const data = Array.isArray(result.items) ? result.items : [];
+
+        if (data.length === 0) {
+          statusEl.textContent = "No hay tareas.";
+          if (userSummaryEl) {
+            userSummaryEl.textContent = `Usuario: ${currentUserId} no tiene tareas.`;
+          }
+          return;
+        }
+
+        for (const task of data) {
+          const tr = document.createElement("tr");
+
+          addCell(tr, task.id);
+          addCell(tr, task.userId);
+          addCell(tr, task.task);
+          addCell(tr, task.done ? "Si" : "No");
+          addCell(tr, formatDateMX(task.createdAt));
+
+          const actionTd = document.createElement("td");
+
+          if (!task.done) {
+            const btnDone = document.createElement("button");
+            btnDone.textContent = "Cerrar";
+            btnDone.addEventListener("click", () => markTaskDone(task));
+            actionTd.appendChild(btnDone);
+          } else {
+            const checkSpan = document.createElement("span");
+            checkSpan.textContent = "✔ ";
+            actionTd.appendChild(checkSpan);
+          }
+
+          const hasNote = (task.note || "").trim() !== "";
+          const btnNote = document.createElement("button");
+          btnNote.textContent = hasNote ? "Ed. Nota" : "Nota";
+          btnNote.style.marginLeft = "5px";
+          btnNote.addEventListener("click", () => openNoteModal(task));
+          actionTd.appendChild(btnNote);
+
+          const btnDel = document.createElement("button");
+          btnDel.textContent = "Borrar";
+          btnDel.style.marginLeft = "5px";
+          btnDel.addEventListener("click", () => deleteTask(task));
+          actionTd.appendChild(btnDel);
+
+          tr.appendChild(actionTd);
+          tbody.appendChild(tr);
+        }
+
+        updateUserSummary(data, currentUserId);
+        statusEl.textContent = `Se cargaron ${data.length} tareas para "${currentUserId}".`;
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error al cargar tareas: " + err.message;
+        if (userSummaryEl) userSummaryEl.textContent = "";
+      }
+    }
+
+    async function createTask() {
+      if (!accessToken || !currentUser) {
+        alert("Primero inicia sesión.");
+        return;
+      }
+
+      const taskText = newTaskInput.value.trim();
+      if (!taskText) {
+        alert("Escribe una tarea");
+        return;
+      }
+
+      statusEl.textContent = "Creando tarea...";
+
+      try {
+        const resp = await apiFetch(`/tasks`, {
+          method: "POST",
+          body: JSON.stringify({
+            task: taskText,
+            done: false,
+            note: "",
+          }),
+        });
+
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+
+        newTaskInput.value = "";
+        statusEl.textContent = "Tarea creada.";
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error al crear tarea: " + err.message;
+      }
+    }
+
+    async function markTaskDone(task) {
+      if (!accessToken) {
+        alert("Primero inicia sesión.");
+        return;
+      }
+
+      if (!confirm(`¿Marcar como cerrada la tarea: "${task.task}"?`)) return;
+
+      statusEl.textContent = "Marcando tarea como cerrada...";
+
+      try {
+        const resp = await apiFetch(`/tasks/${encodeURIComponent(task.id)}`, {
+          method: "PUT",
+          body: JSON.stringify({ done: true }),
+        });
+
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+
+        statusEl.textContent = "Tarea actualizada.";
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error al actualizar tarea: " + err.message;
+      }
+    }
+
+    async function deleteTask(task) {
+      if (!accessToken) {
+        alert("Primero inicia sesión.");
+        return;
+      }
+
+      if (!confirm(`¿Seguro que deseas borrar la tarea "${task.task}"?`)) {
+        return;
+      }
+
+      statusEl.textContent = "Eliminando tarea...";
+
+      try {
+        const resp = await apiFetch(`/tasks/${encodeURIComponent(task.id)}`, {
+          method: "DELETE",
+        });
+
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+
+        statusEl.textContent = "Tarea eliminada.";
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error al eliminar tarea: " + err.message;
+      }
+    }
+
+    function addCell(tr, text) {
+      const td = document.createElement("td");
+      td.textContent = text ?? "";
+      tr.appendChild(td);
+    }
+
+    function formatDateMX(isoString) {
+      if (!isoString) return "";
+
+      const date = new Date(isoString);
+      if (isNaN(date)) return isoString;
+
+      const parts = new Intl.DateTimeFormat("es-MX", {
+        timeZone: "America/Monterrey",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }).formatToParts(date);
+
+      const get = (type) => parts.find(p => p.type === type)?.value;
+
+      const day = get("day");
+      const month = get("month");
+      const year = get("year");
+      const hour = get("hour");
+      const minute = get("minute");
+      const dayPeriod = (get("dayPeriod") || "")
+        .toUpperCase()
+        .replace(/\./g, "")
+        .replace(/\s/g, "");
+
+      return `${day}/${month}/${year} ${hour}:${minute} ${dayPeriod}`;
+    }
+
+    // ========== Login / Logout ==========
+    async function login() {
+      const username = (usernameInput.value || "").trim();
+      const password = passwordInput.value;
+
+      if (!username || !password) {
+        alert("Ingresa usuario y contraseña");
+        return;
+      }
+
+      statusEl.textContent = "Iniciando sesión...";
+
+      try {
+        const resp = await fetch(`${API_BASE_URL}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+
+        if (!resp.ok) {
+          throw new Error("HTTP " + resp.status);
+        }
+
+        const data = await resp.json();
+        saveAuth(data.accessToken, data.refreshToken, data.user);
+
+        statusEl.textContent = "Login correcto.";
+        passwordInput.value = "";
+
+        await loadTasks();
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Error en login: " + err.message;
+        alert("No se pudo iniciar sesión. Revisa usuario/contraseña.");
+      }
+    }
+
+    function logout() {
+      clearAuth();
+      statusEl.textContent = "Sesión cerrada.";
+      tbody.innerHTML = "";
+      if (userSummaryEl) userSummaryEl.textContent = "";
+    }
+
+    // Eventos principales
+    loadBtn.addEventListener("click", loadTasks);
+    createBtn.addEventListener("click", createTask);
+    loginBtn.addEventListener("click", login);
+    logoutBtn.addEventListener("click", logout);
+
+    // Cargar tokens al abrir la página
+    loadAuthFromStorage();
+  </script>
+</body>
+</html>
