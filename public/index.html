@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <title>Listado de tareas (Cosmos)</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#1976d2" />
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     h1 { font-size: 20px; }
@@ -562,6 +564,19 @@
 
     // Cargar tokens al abrir la página
     loadAuthFromStorage();
+	
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker
+          .register("./sw.js")
+          .then((reg) => {
+            console.log("Service Worker registrado:", reg.scope);
+          })
+          .catch((err) => {
+            console.error("Error al registrar Service Worker:", err);
+          });
+      });
+    }
   </script>
 </body>
 </html>
