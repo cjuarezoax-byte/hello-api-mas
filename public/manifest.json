@@ -1,7 +1,8 @@
 {
-  "name": "Infra API ToDo",
+  "name": "Hello API MAS - ToDo",
   "short_name": "ToDo",
-  "start_url": "./index.html",
+  "start_url": "/hello-api-mas/",
+  "scope": "/hello-api-mas/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#1976d2",
